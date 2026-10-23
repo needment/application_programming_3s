@@ -1,53 +1,21 @@
+"""
+Основной модуль: чтение, валидация, сортировка и сохранение анкет.
+"""
+
 import argparse
 import re
-from datetime import date
+import sys
 
-RE_NAME = re.compile(r'^[A-ZА-ЯЁ][a-zа-яёA-ZА-ЯЁ\-]*$')
-RE_GENDER = re.compile(r'^(?:[МмЖж]|[Мм]ужской|[Жж]енский)$')
-RE_DATE = re.compile(r'^(\d{1,2})([./-])(\d{1,2})\2(\d{4})$')
-RE_PHONE = re.compile(r'^(?:\+7|8)(?:\d{10}|(?:\s?\(\d{3}\)|\s\d{3})\s?\d{3}[-\s]\d{2}[-\s]\d{2})$')
-RE_EMAIL = re.compile(r'^[A-Za-z0-9._%+-]{1,64}@(gmail\.com|mail\.ru|yandex\.ru)$')
-RE_CITY = re.compile(r'^(?:г\.\s*)?[A-ZА-ЯЁ][a-zа-яёA-ZА-ЯЁ\s\-]*$')
-
-KEYS = [
-    'Фамилия',
-    'Имя',
-    'Пол',
-    'Дата рождения',
-    'Номер телефона или email',
-    'Город',
-]
-
-
-def is_valid_date(value: str) -> bool:
-    match = RE_DATE.fullmatch(value)
-    if not match:
-        return False
-    d, _, m, y = match.groups()
-    try:
-        day, month, year = int(d), int(m), int(y)
-        if not (1900 <= year <= date.today().year):
-            return False
-        date(year, month, day)
-        return True
-    except ValueError:
-        return False
-
-
-def is_valid_record(rec: dict[str, str]) -> bool:
-    if not all(k in rec for k in KEYS):
-        return False
-    return (
-        bool(RE_NAME.fullmatch(rec['Фамилия']))
-        and bool(RE_NAME.fullmatch(rec['Имя']))
-        and bool(RE_GENDER.fullmatch(rec['Пол']))
-        and is_valid_date(rec['Дата рождения'])
-        and (bool(RE_PHONE.fullmatch(rec['Номер телефона или email'])) or bool(RE_EMAIL.fullmatch(rec['Номер телефона или email'])))
-        and bool(RE_CITY.fullmatch(rec['Город']))
-    )
+from validators import KEYS, is_valid_record
 
 
 def load_records(file_path: str) -> list[dict[str, str]]:
+    """
+    Чтение и первичный разбор анкет из текстового файла.
+
+    :param file_path: Путь к входному файлу.
+    :return: Список словарей с данными анкет.
+    """
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read().strip()
 
@@ -55,9 +23,9 @@ def load_records(file_path: str) -> list[dict[str, str]]:
         return []
 
     blocks = [b.strip() for b in re.split(r'\n\s*\n', content) if b.strip()]
-    records = []
+    records: list[dict[str, str]] = []
     for block in blocks:
-        rec = {}
+        rec: dict[str, str] = {}
         for line in block.splitlines():
             if ':' in line:
                 key, val = line.split(':', 1)
@@ -66,31 +34,63 @@ def load_records(file_path: str) -> list[dict[str, str]]:
             records.append(rec)
     return records
 
-# Отсортируйте исходный список по фамилиям и именам в алфавитном порядке
-# и сохраните результат в новый файл (структура списка не меняется).
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('input_file', type=str)
-    parser.add_argument('-o', '--output', type=str, default='result.txt')
-    args = parser.parse_args()
+def format_records(records: list[dict[str, str]]) -> str:
+    """
+    Преобразование списка словарей анкет в форматированную строку.
 
-    records = load_records(args.input_file)
-    valid_records = [rec for rec in records if is_valid_record(rec)]
-
-    sorted_records = sorted(valid_records, key=lambda x: (x['Фамилия'], x['Имя']))
-
-    formatted_blocks = []
-    for i, rec in enumerate(sorted_records, start=1):
+    :param records: Список анкет.
+    :return: Результирующий текст.
+    """
+    formatted_blocks: list[str] = []
+    for i, rec in enumerate(records, start=1):
         block_lines = [f"{i})"]
         for key in KEYS:
             block_lines.append(f"{key}: {rec[key]}")
         formatted_blocks.append('\n'.join(block_lines))
+    return '\n\n'.join(formatted_blocks)
 
-    formatted_output = '\n\n'.join(formatted_blocks)
 
-    with open(args.output, 'w', encoding='utf-8') as f:
-        f.write(formatted_output + ('\n' if formatted_output else ''))
+def save_records(file_path: str, data: str) -> None:
+    """
+    Запись строковых данных в файл.
+
+    :param file_path: Путь к выходному файлу.
+    :param data: Текст для записи.
+    """
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(data + ('\n' if data else ''))
+
+
+def main() -> None:
+    """
+    Точка входа в программу: разбор аргументов командной строки,
+    вызов валидации, сортировка и вывод результатов.
+    """
+    parser = argparse.ArgumentParser(
+        description='Обработка, валидация и сортировка анкетных данных.'
+    )
+    parser.add_argument('input_file', type=str, help='Путь к входному файлу с анкетами')
+    parser.add_argument(
+        '-o', '--output', type=str, default='result.txt', help='Путь к файлу результата'
+    )
+    args = parser.parse_args()
+
+    try:
+        records = load_records(args.input_file)
+    except OSError as exc:
+        print(f"Ошибка чтения входного файла: {exc}", file=sys.stderr)
+        return
+
+    valid_records = [rec for rec in records if is_valid_record(rec)]
+    sorted_records = sorted(valid_records, key=lambda x: (x['Фамилия'], x['Имя']))
+    formatted_output = format_records(sorted_records)
+
+    try:
+        save_records(args.output, formatted_output)
+    except OSError as exc:
+        print(f"Ошибка записи в выходной файл: {exc}", file=sys.stderr)
+        return
 
     print(formatted_output)
 
